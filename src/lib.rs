@@ -33,6 +33,7 @@ impl GrArena {
         // Safety:
         // We don't hand out references to the arena.
         // Additionally, nobody else can own the arena mutably, since we borrowed it.
+        // There are no other pointers into gens or unused, so we can mutate them.
         let arena = unsafe { &mut *self.inner.get() };
         loop {
             match (*arena).unused.pop() {
@@ -92,10 +93,9 @@ impl<'a, T> Gr<'a, T> {
 impl<'a, T> Drop for Gr<'a, T> {
     fn drop(&mut self) {
         unsafe {
-            Box::from_raw(self.ptr.as_mut());
-            let gen = self.gen();
-            *gen += 1;
-            (*self.arena).unused.push(self.gen_idx);
+            Box::from_raw(self.ptr.as_mut()); // Drop data
+            *self.gen() += 1; // Increment the GN
+            (*self.arena).unused.push(self.gen_idx); // Add to free list
         }
     }
 }
