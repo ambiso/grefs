@@ -1,4 +1,4 @@
-use std::{cell::UnsafeCell, marker::PhantomData};
+use std::{cell::UnsafeCell, marker::PhantomData, ptr::NonNull};
 
 const MAX_ALLOCS: usize = 1 << 9;
 
@@ -27,7 +27,7 @@ impl GrArena {
             match (*arena).unused.pop() {
                 Some(gen_idx) => {
                     return Gr {
-                        ptr: Box::leak(Box::new(v)) as *mut T,
+                        ptr: NonNull::from(Box::leak(Box::new(v))),
                         gen_idx: gen_idx,
                         arena: arena as *mut GrArenaInternal,
                         phantom: PhantomData,
@@ -45,7 +45,7 @@ impl GrArena {
 }
 
 pub struct Gr<'a, T> {
-    ptr: *mut T,
+    ptr: NonNull<T>,
     gen_idx: usize,
     arena: *mut GrArenaInternal,
     phantom: std::marker::PhantomData<&'a u64>,
@@ -72,7 +72,7 @@ impl<'a, T> Gr<'a, T> {
 impl<'a, T> Drop for Gr<'a, T> {
     fn drop(&mut self) {
         unsafe {
-            Box::from_raw(self.ptr);
+            Box::from_raw(self.ptr.as_mut());
             let gen = self.gen();
             *gen += 1;
             (*self.arena).unused.push(self.gen_idx);
@@ -81,7 +81,7 @@ impl<'a, T> Drop for Gr<'a, T> {
 }
 
 pub struct Weak<'a, T> {
-    ptr: *mut T,
+    ptr: NonNull<T>,
     gen: *const u64,
     alloc_gen: u64,
     phantom: std::marker::PhantomData<&'a u64>,
@@ -92,7 +92,7 @@ impl<'a, T> Weak<'a, T> {
         if unsafe { *self.gen } != self.alloc_gen {
             None
         } else {
-            unsafe { Some(std::mem::transmute(self.ptr)) }
+            unsafe { Some(self.ptr.as_ref()) }
         }
     }
 }
@@ -121,10 +121,14 @@ mod tests {
     #[test]
     fn many() {
         let arena = GrArena::new();
-
         let mut allocs = Vec::new();
+
         for _ in 0..10000 {
             allocs.push(arena.alloc(String::from("Hello World")));
+        }
+
+        for i in allocs {
+            println!("{}", i.weak().get().expect("String should be available"));
         }
     }
 }
