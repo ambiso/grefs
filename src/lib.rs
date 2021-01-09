@@ -1,46 +1,62 @@
 use std::marker::PhantomData;
 
-const MAX_ALLOCS: usize = 512;
+const MAX_ALLOCS: usize = 1 << 9;
 
 pub struct GrArena {
-    gens: [u64; MAX_ALLOCS],
+    gens: Vec<&'static mut [u64; MAX_ALLOCS]>,
     unused: Vec<usize>,
 }
 
 impl GrArena {
     pub fn new() -> Self {
-        let mut unused = Vec::with_capacity(MAX_ALLOCS);
-        for i in 0..MAX_ALLOCS {
-            unused.push(i);
-        }
         GrArena {
-            gens: [1; MAX_ALLOCS],
-            unused: unused,
+            gens: Vec::new(),
+            unused: Vec::new(),
         }
     }
 
     pub fn alloc<'a, T>(&'a mut self, v: T) -> Gr<'a, T> {
-        let gen_idx = self.unused.pop().unwrap();
-        Gr {
-            ptr: Box::leak(Box::new(v)) as *mut T,
-            gen: unsafe { self.gens.as_mut_ptr().add(gen_idx) },
-            phantom: PhantomData,
+        loop {
+            match self.unused.pop() {
+                Some(gen_idx) => {
+                    return Gr {
+                        ptr: Box::leak(Box::new(v)) as *mut T,
+                        gen_idx: gen_idx,
+                        arena: self as *mut GrArena,
+                        phantom: PhantomData,
+                    };
+                }
+                None => {
+                    self.gens.push(Box::leak(Box::new([1; MAX_ALLOCS])));
+                    for i in 0..MAX_ALLOCS {
+                        self.unused.push(i + (self.gens.len()-1) * MAX_ALLOCS);
+                    }
+                }
+            }
         }
     }
 }
 
 pub struct Gr<'a, T> {
     ptr: *mut T,
-    gen: *mut u64,
+    gen_idx: usize,
+    arena: *mut GrArena,
     phantom: std::marker::PhantomData<&'a u64>,
 }
 
 impl<'a, T> Gr<'a, T> {
+    unsafe fn gen(&self) -> *mut u64 {
+        (*self.arena).gens[self.gen_idx / MAX_ALLOCS]
+            .as_mut_ptr()
+            .add(self.gen_idx % MAX_ALLOCS)
+    }
+
     pub fn weak(&self) -> Weak<'a, T> {
+        let gen = unsafe { self.gen() };
         Weak {
             ptr: self.ptr,
-            gen: self.gen,
-            alloc_gen: unsafe { *self.gen },
+            gen: gen,
+            alloc_gen: unsafe { *gen },
             phantom: PhantomData,
         }
     }
@@ -50,7 +66,9 @@ impl<'a, T> Drop for Gr<'a, T> {
     fn drop(&mut self) {
         unsafe {
             Box::from_raw(self.ptr);
-            *self.gen += 1;
+            let gen = self.gen();
+            *gen += 1;
+            (*self.arena).unused.push(self.gen_idx);
         }
     }
 }
@@ -91,6 +109,15 @@ mod tests {
         assert_eq!(s, None);
         let s = r2.get();
         assert_eq!(s, None);
+    }
 
+    #[test]
+    fn many() {
+        let mut arena = GrArena::new();
+
+        let mut allocs = Vec::new();
+        for _ in 0..10000 {
+            allocs.push(arena.alloc(String::from("Hello World")));
+        }
     }
 }
