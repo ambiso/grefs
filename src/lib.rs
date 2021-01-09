@@ -1,35 +1,42 @@
-use std::marker::PhantomData;
+use std::{cell::UnsafeCell, marker::PhantomData};
 
 const MAX_ALLOCS: usize = 1 << 9;
 
-pub struct GrArena {
+struct GrArenaInternal {
     gens: Vec<&'static mut [u64; MAX_ALLOCS]>,
     unused: Vec<usize>,
+}
+
+pub struct GrArena {
+    inner: UnsafeCell<GrArenaInternal>,
 }
 
 impl GrArena {
     pub fn new() -> Self {
         GrArena {
-            gens: Vec::new(),
-            unused: Vec::new(),
+            inner: UnsafeCell::new(GrArenaInternal {
+                gens: Vec::new(),
+                unused: Vec::new(),
+            })
         }
     }
 
-    pub fn alloc<'a, T>(&'a mut self, v: T) -> Gr<'a, T> {
+    pub fn alloc<'a, T>(&'a self, v: T) -> Gr<'a, T> {
+        let arena = unsafe { &mut *self.inner.get() };
         loop {
-            match self.unused.pop() {
+            match (*arena).unused.pop() {
                 Some(gen_idx) => {
                     return Gr {
                         ptr: Box::leak(Box::new(v)) as *mut T,
                         gen_idx: gen_idx,
-                        arena: self as *mut GrArena,
+                        arena: arena as *mut GrArenaInternal,
                         phantom: PhantomData,
                     };
                 }
                 None => {
-                    self.gens.push(Box::leak(Box::new([1; MAX_ALLOCS])));
+                    arena.gens.push(Box::leak(Box::new([1; MAX_ALLOCS])));
                     for i in 0..MAX_ALLOCS {
-                        self.unused.push(i + (self.gens.len()-1) * MAX_ALLOCS);
+                        arena.unused.push(i + (arena.gens.len()-1) * MAX_ALLOCS);
                     }
                 }
             }
@@ -40,7 +47,7 @@ impl GrArena {
 pub struct Gr<'a, T> {
     ptr: *mut T,
     gen_idx: usize,
-    arena: *mut GrArena,
+    arena: *mut GrArenaInternal,
     phantom: std::marker::PhantomData<&'a u64>,
 }
 
@@ -96,7 +103,7 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let mut arena = GrArena::new();
+        let arena = GrArena::new();
         let r1;
         let r2;
         {
@@ -113,7 +120,7 @@ mod tests {
 
     #[test]
     fn many() {
-        let mut arena = GrArena::new();
+        let arena = GrArena::new();
 
         let mut allocs = Vec::new();
         for _ in 0..10000 {
