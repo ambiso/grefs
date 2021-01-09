@@ -1,5 +1,5 @@
-// Generational References 
-// Adapted from https://vale.dev/blog/generational-references 
+// Generational References
+// Adapted from https://vale.dev/blog/generational-references
 
 use std::{cell::UnsafeCell, marker::PhantomData, ptr::NonNull};
 
@@ -25,7 +25,7 @@ impl GrArena {
             inner: UnsafeCell::new(GrArenaInternal {
                 gens: Vec::new(),
                 unused: Vec::new(),
-            })
+            }),
         }
     }
 
@@ -50,7 +50,7 @@ impl GrArena {
                     // Add more slots if we ran out
                     arena.gens.push(Box::new([1; MAX_ALLOCS]));
                     for i in 0..MAX_ALLOCS {
-                        arena.unused.push(i + (arena.gens.len()-1) * MAX_ALLOCS);
+                        arena.unused.push(i + (arena.gens.len() - 1) * MAX_ALLOCS);
                     }
                 }
             }
@@ -180,7 +180,7 @@ mod tests {
 
             // Store all weak refs, drop all owning refs, and test that none can be retrieved
             let mut weak_refs = Vec::new();
-            
+
             for or in allocs.iter() {
                 weak_refs.push(or.weak());
             }
