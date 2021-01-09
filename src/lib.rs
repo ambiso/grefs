@@ -123,12 +123,25 @@ mod tests {
         let arena = GrArena::new();
         let mut allocs = Vec::new();
 
-        for _ in 0..10000 {
+        for _ in 0..1500 {
             allocs.push(arena.alloc(String::from("Hello World")));
         }
 
-        for i in allocs {
-            println!("{}", i.weak().get().expect("String should be available"));
+        for i in allocs.iter() {
+            i.weak().get().expect("String should be available");
         }
+
+        let wr;
+        {
+            let r = allocs.pop().unwrap();
+            wr = r.weak();
+        }
+        assert_eq!(wr.get(), None);
+        let new_s = arena.alloc(String::from("test"));
+
+        assert_eq!(wr.get(), None);
+        let wr2 = new_s.weak();
+        let s = wr2.get();
+        assert_ne!(s, None);
     }
 }
