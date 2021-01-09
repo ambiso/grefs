@@ -3,7 +3,7 @@ use std::{cell::UnsafeCell, marker::PhantomData, ptr::NonNull};
 const MAX_ALLOCS: usize = 1 << 9;
 
 struct GrArenaInternal {
-    gens: Vec<&'static mut [u64; MAX_ALLOCS]>,
+    gens: Vec<Box<[u64; MAX_ALLOCS]>>,
     unused: Vec<usize>,
 }
 
@@ -34,7 +34,7 @@ impl GrArena {
                     };
                 }
                 None => {
-                    arena.gens.push(Box::leak(Box::new([1; MAX_ALLOCS])));
+                    arena.gens.push(Box::new([1; MAX_ALLOCS]));
                     for i in 0..MAX_ALLOCS {
                         arena.unused.push(i + (arena.gens.len()-1) * MAX_ALLOCS);
                     }
