@@ -30,17 +30,19 @@ impl GrArena {
     }
 
     pub fn alloc<'a, T>(&'a self, v: T) -> Gr<'a, T> {
-        // Safety:
+        // SAFETY:
         // We don't hand out references to the arena.
         // Additionally, nobody else can own the arena mutably, since we borrowed it.
         // There are no other pointers into gens or unused, so we can mutate them.
+        // However, there are pointers into the Boxed arrays, so we must not drop them.
+        // Additionally GrArena is not Sync.
         let arena = unsafe { &mut *self.inner.get() };
         loop {
             match (*arena).unused.pop() {
                 Some(gen_idx) => {
                     // Found an unused slot, return a strong reference to it
                     return Gr {
-                        ptr: NonNull::from(Box::leak(Box::new(v))),
+                        ptr: UnsafeCell::new(Box::new(v)),
                         gen_idx: gen_idx,
                         arena: arena as *mut GrArenaInternal,
                         phantom: PhantomData,
@@ -60,7 +62,7 @@ impl GrArena {
 
 pub struct Gr<'a, T> {
     // The contained data
-    ptr: NonNull<T>,
+    ptr: UnsafeCell<Box<T>>,
     // The index into the generational numbers array
     gen_idx: usize,
     // A pointer to the owning arena.
@@ -82,7 +84,7 @@ impl<'a, T> Gr<'a, T> {
         // Get a pointer to the GN
         let gen = unsafe { self.gen() };
         Weak {
-            ptr: self.ptr,
+            ptr: unsafe { NonNull::new_unchecked((*self.ptr.get()).as_mut()) },
             gen: gen,
             alloc_gen: unsafe { *gen },
             phantom: PhantomData,
@@ -93,7 +95,6 @@ impl<'a, T> Gr<'a, T> {
 impl<'a, T> Drop for Gr<'a, T> {
     fn drop(&mut self) {
         unsafe {
-            Box::from_raw(self.ptr.as_mut()); // Drop data
             *self.gen() += 1; // Increment the GN
             (*self.arena).unused.push(self.gen_idx); // Add to free list
         }
